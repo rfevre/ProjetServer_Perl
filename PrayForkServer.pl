@@ -4,11 +4,14 @@ use Socket;
 use POSIX ":sys_wait_h";
 
 #Initialisation du server avec les valeur du fichier "comanche.conf"
-init;
+init();
 
 while(<STDIN>){
 	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/){
-		print $_, "\n";
+		get($_);
+	}
+	else {
+		error400();
 	}
 }
 
@@ -64,6 +67,33 @@ sub init{
 	close(CONFIG);
 } 
 
-sub getVerif{
+# TODO : verifier ce que demande l'utilisateur
+sub get{
+	print $_;
+}
+
+# renvoie erreur 404
+sub error404
+{
+    # On considere que la page par default est celle qui reponds a une erreur de type 404
+    $reponse = readFile($confs{"set"}{"error"});
+    $reponse .= "<hr><p>Comanche Version 1</p>";
+    # On envoie la réponse
+    print "HTTP/1.1 404 Not Found\r\n" .
+	      "Content-Type: text/html\r\n" .
+		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 $reponse;
+    exit 0;
+}
+
+# renvoie erreur 400
+sub error400
+{
+    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Version 1</p></body></html>";
+    print "HTTP/1.1 400 Bad Request\r\n" .
+	         "Content-type : text/html\r\n" .
+		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 $reponse;
+    exit 0;
 
 }
