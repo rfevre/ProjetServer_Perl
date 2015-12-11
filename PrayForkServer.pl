@@ -1,5 +1,8 @@
 #!/usr/bin/perl
 
+#Initialisation du server avec les valeur du fichier "comanche.conf"
+init;
+
 sub init {
 	sub order {
 		if(s/^set ([\w]+)/$1/g) {
@@ -48,6 +51,6 @@ sub init {
 			order $order;
 		}
 	}
-}
 
-init;
+	close(CONFIG);
+}
