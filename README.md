@@ -2,7 +2,7 @@
 
 TODO
 --------
-- [ ] Configuration
+- [x] Configuration
 - [ ] Traitement des GET...
   - [ ] ...vers le système de fichiers
   - [ ] ...vers des programmes CGI
