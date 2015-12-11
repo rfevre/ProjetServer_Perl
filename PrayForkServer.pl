@@ -5,31 +5,12 @@ use POSIX ":sys_wait_h";
 
 #Initialisation du server avec les valeur du fichier "comanche.conf"
 init;
-socket (SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
-setsockopt (SERVEUR, SOL_SOCKET, SO_REUSEADDR, 1);
-$mon_adresse = sockaddr_in ($confs{"set"}{"port"}, INADDR_ANY);
-bind(SERVEUR, $mon_adresse) || die ("bind");
-listen (SERVEUR, SOMAXCONN) || die ("listen");
 
-#Tant que le serveur reçoie des requêtes 
-while (true) {
-    accept (CLIENT, SERVEUR) || die ("accept");
-
-    if(fork() == 0) {
-	CLIENT->autoflush(1);
-	while (<CLIENT>){
-	    print CLIENT "serveur : $_";
+while(<STDIN>){
+	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/){
+		print $_, "\n";
 	}
-	exit 0;
-    }
-
-    close (CLIENT);
-    do{
-	$wPid = waitpid(-1,WNOHANG);
-    }while($wPid > 0);
 }
-
-close (SERVEUR);
 
 sub init{
 	sub order{
