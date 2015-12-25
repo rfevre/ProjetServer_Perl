@@ -2,7 +2,7 @@
 
 TODO
 --------
-- [ ] Configuration
+- [x] Configuration
 - [ ] Traitement des GET...
   - [ ] ...vers le système de fichiers
   - [ ] ...vers des programmes CGI
@@ -10,9 +10,9 @@ TODO
 - [ ] Traitement des requêtes en parallèle
 - [ ] Gestion des erreurs
   - [ ] 200 OK
-  - [ ] 400 Bad Request
+  - [x] 400 Bad Request
   - [ ] 403 Forbidden
-  - [ ] 404 Not Found
+  - [x] 404 Not Found
   - [ ] 405 Method Not Allowed
   - [ ] 415 Unsupported Media Type
   - [ ] 503 Service Unavailable
