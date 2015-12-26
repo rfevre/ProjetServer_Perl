@@ -5,7 +5,7 @@ TODO
 - [x] Configuration
 - [x] Traitement des GET...
   - [x] ...vers le système de fichiers
-  - [x] ...vers des programmes CGI
+  - [ ] ...vers des programmes CGI
 - [ ] Journal des évènements
 - [ ] Traitement des requêtes en parallèle
 - [ ] Gestion des erreurs
