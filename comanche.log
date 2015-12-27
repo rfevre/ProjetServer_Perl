@@ -1,0 +1,9 @@
+1451249496;start;local;8080;;;
+1451249596;start;local;8080;;;
+1451249715;start;local;8080;;;
+1451249836;start;local;8080;;;
+1451249842;stop;local;;;;
+1451249859;start;local;8080;;;
+1451249869;get-s;127.0.0.1;GET /test HTTP/1.1;var/www/test/.liste.html;200;
+1451249884;get-s;127.0.0.1;GET /index.html HTTP/1.1;var/www/index.html;200;
+1451249912;stop;local;;;;

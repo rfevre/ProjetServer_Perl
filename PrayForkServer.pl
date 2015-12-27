@@ -6,12 +6,72 @@ use POSIX ":sys_wait_h";
 no warnings qw( experimental::autoderef );
 no warnings 'experimental::smartmatch';
 
-# Initialisation du server avec les valeurs du fichier "comanche.conf"
-init("comanche.conf");
+# Fichier contenant le pid du processus principal
+$pidServFile = ".pid";
 
-while(<STDIN>) {
-	print lectureRequete($_);
-	exit 0;
+#Signaux
+$SIG{QUIT} = \&stopProcessus;
+
+# Nombre de clients connecter
+$nbrClients = 0;
+
+checkParameter();
+
+# On demarre le serveur
+sub checkParameter
+{
+	die "Parametre : start/stop/status\n" if @ARGV != 1;
+
+	if ($ARGV[0] eq "start")
+	{
+		start();
+	}
+	elsif ($ARGV[0] eq "stop")
+	{
+		stop();
+	}
+	elsif ($ARGV[0] eq "status")
+	{
+		status();
+	}
+	else
+	{
+		die "Incorrect parametre : start/stop/status\n";
+	}
+}
+
+# Fonction pour démarrer le serveur
+sub start
+{
+	#Si le serveur est déjà demarré on arrete le lancement
+    if(-f $pidServFile){
+		die("Comanche est déjà en cours d'executions\n");
+    }
+    else {
+    	# Initialisation du server avec les valeurs du fichier "comanche.conf"
+		init("comanche.conf");
+   		demarrerServeur();
+    }
+}
+
+# Fonction pour arréter le serveur
+sub stop
+{
+	kill QUIT, getpid() || die("Le serveur n'est pas en cours d'execution\n");
+    unlink($pidServFile);
+    print "Serveur arrêté !","\n";
+	ecrireDansLog("stop", "local", $confs{"set"}{"port"}, "", "");
+}
+
+sub stopProcessus {
+	$start = 0;
+	while (wait != -1) {}
+}
+
+# Fonction pour afficher le status du serveur
+sub status
+{
+
 }
 
 #Initialisation des paramétres
@@ -74,13 +134,72 @@ sub init {
 	close(CONFIG);
 } 
 
+# Démarrage du serveur
+sub demarrerServeur
+{
+	my $pid = fork();
+	# Le père se quitte, le fils va créer le listener et instancier un autre fils par requête à partir d'ici.
+	if($pid == 0)
+	{
+		socket (SERVER, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+		setsockopt (SERVER, SOL_SOCKET, SO_REUSEADDR, 1);
+		my $addr = sockaddr_in ($confs{"set"}{"port"}, INADDR_ANY) || do { unlink($pidServFile); die ("sockaddr_in\n"); };
+		bind(SERVER, $addr) || do { unlink($pidServFile); die ("Bind : $!"); };
+		listen(SERVER, SOMAXCONN) || do { unlink($pidServFile); die "Listen : $!"; };
+
+		#variable qui permet de gerer le start/stop du serveur
+		$start = 1;
+
+		while (accept(CLIENT,SERVER) or do { last if $start eq 0; die("Accept impossible : $!\n"); } ) {
+			CLIENT->autoflush(1);
+
+			# Si trop de client simultannée
+		    if($nbrClients > $config{"set"}{"clients"}){
+		    	print CLIENT error503();
+		    	exit 0;
+		    }
+		    # Sinon on lance le fork pour que les clients puissent se connecter en simultannées
+		    else{
+				$pid = fork();
+
+				if($pid == 0){
+					#permet de recuperer l'addresse IP du client
+				    $peer = getpeername(CLIENT);
+				    ($port, $iaddr) = sockaddr_in($peer);
+				    $ipClient = inet_ntoa($iaddr);
+
+					$requete = <CLIENT>;
+					chomp($requete);
+					print CLIENT lectureRequete($requete);
+					exit 0;
+				}
+			}
+			close(CLIENT) or die ("Close Client : $!");
+		}
+
+		close(SERVER) or die ("Close Server : $!");
+	}
+	else
+	{
+		# On enregistre le pid du serveur
+		open(PID, ">$pidServFile");
+		print PID $pid;
+		close(PID);
+		print "Serveur lancé !\n";
+		ecrireDansLog("start", "local", $confs{"set"}{"port"}, "", "");
+		exit 0;
+	}
+
+}
 
 # Traitement requête GET
 sub lectureRequete {
+	#Requete
 	my $message;
+	my $requete = shift();
 
-	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/) {
-		$chemin = verifProjection($1);
+	if ($requete =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/) {
+		my $chemin = verifProjection($1);
 		
 		if ($chemin) {
 			$message = verifChemin(substr($chemin,1));
@@ -152,6 +271,7 @@ sub verifChemin {
 	return $message;
 }
 
+# Créer la réponse si c'est un fichier ou dossier
 sub versFichiers {
 	my $chemin = shift();
 	my $message;
@@ -160,12 +280,12 @@ sub versFichiers {
 		# Et que l'index existe
 		if (-e "$chemin/$confs{\"set\"}{\"index\"}") {
 			$chemin = "$chemin/$confs{\"set\"}{index}";
-			$message = envoieOk($chemin, "text/html");
+			$message = envoieReponseFichier($chemin, "text/html");
 		}
 		# Sinon on créer une page html pour lister son contenu
 		else {
 			$chemin = listerElements($chemin);
-			$message = envoieOk($chemin, "text/html");
+			$message = envoieReponseFichier($chemin, "text/html");
 			}
 		}
 	# Si fichier
@@ -182,7 +302,7 @@ sub versFichiers {
 			elsif((split(/\./, "$chemin"))[-1] eq "txt") {
 				$mime = "text/plain";
 			}
-			$message = envoieOk($chemin, $mime);
+			$message = envoieReponseFichier($chemin, $mime);
 		}
 		else {
 			$message = error415();
@@ -192,12 +312,13 @@ sub versFichiers {
 	return $message;
 }
 
+# Créer la réponse si c'est un programme CGI
 sub versCGI {
 	my $chemin = shift();
 	my $message;
 	my $reponse = `perl $chemin`;
 	my $mime = ".html";
-	$message = envoieReponse($reponse, $mime);
+	$message = envoieReponseCGI($reponse, $mime);
 
 	return $message;
 }
@@ -205,7 +326,7 @@ sub versCGI {
 # Créer une réponse HTML qui liste tous les fichiers d'un dossier
 sub listerElements {
 	my $chemin = shift();
-	my $liste = "$chemin/liste.html";
+	my $liste = "$chemin/.liste.html";
 	open(FIC, '>', $liste) or die "Open : $liste :  $!";
 
 	print FIC "<html>\n\t<head>\n\t\t<title>Liste elements</title>\n\t</head>\n\t<body>\n\t\t<center>\n\t\t\t<h1>Liste elements</h1>\n\t\t\t<ul>";
@@ -217,6 +338,45 @@ sub listerElements {
 
 	close(FIC);
 	return $liste;
+}
+ 
+# Verifie si le fichier log existe, si il n'existe pas, il est créé
+sub verifFichierLog {
+    $logFile = $confs{"set"}{"logfile"};
+    $logFile = "comanche.log" if(! -f $logFile);
+
+    open(LOGFILE, ">>$logFile") or die "Open logFile : $!";
+
+    close LOGFILE or die "Close logFile : $!";
+}
+
+# Ecrit dans le fichier de "log"
+# Parametres : "Type" - "Machine" - "Requete" - "Projection" - "Reponse"
+sub ecrireDansLog {
+	verifFichierLog();
+	
+    my $date = time();
+    my $type = shift;
+    my $machine = shift;
+    my $requete = shift;
+    my $projection = shift;
+    my $reponse = shift;
+
+    open(LOGFILE, ">>$logFile") or die "Open logFile : $!";
+
+    print LOGFILE "$date;$type;$machine;$requete;$projection;$reponse;\n";
+
+    close LOGFILE or die "Close logFile : $!";
+}
+
+
+# Permet d'obtenir le pid stocker dans un fichier lors du demerage
+sub getpid {
+    open(PID, "$pidServFile");
+    my $pid = <PID>;
+    close(PID);
+
+    return $pid;
 }
 
 # Procedure permettant de lire le contenue d'un fichier avant de l'afficher
@@ -234,8 +394,8 @@ sub readFile {
     return $contenu;
 }
 
-# Envoie Ok
-sub envoieOk {
+# Construit une reponse pour les fichiers et dossiers
+sub envoieReponseFichier {
 	my $message;
 	my $chemin = shift();
 	my $mime = shift();
@@ -244,11 +404,14 @@ sub envoieOk {
 				"Content-type : $mime\r\n" .
 				"Content-Length : " . length($reponse) . "\r\n\r\n" .
 				$reponse . "\r\n";
+
+	ecrireDansLog("get-s", $ipClient, "$requete", "$chemin", "200");
+
 	return $message;
 }
 
-# Envoie une reponse
-sub envoieReponse {
+# Construit une reponse pour les programmes CGI
+sub envoieReponseCGI {
 	my $message;
 	my $reponse = shift();
 	my $mime = shift();
@@ -256,6 +419,9 @@ sub envoieReponse {
 				"Content-type : $mime\r\n" .
 				"Content-Length : " . length($reponse) . "\r\n\r\n" .
 				$reponse . "\r\n";
+
+	ecrireDansLog("get-d", "$ipClient", "$requete", "$chemin", "200");
+	
 	return $message;
 }
 
@@ -275,7 +441,7 @@ sub error404 {
 # Envoie une erreur 400
 sub error400 {
 	my $message;
-    my $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Server</p></body></html>";
+    my $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1></body></html>";
     $message = "HTTP/1.1 400 Bad Request\r\n" .
 	      		"Content-type : text/html\r\n" .
 		  		"Content-Length: " . length($reponse) . "\r\n\r\n" .
@@ -285,10 +451,20 @@ sub error400 {
 
 sub error415 {
 	my $message;
-	my $reponse = "<html><head><title>Unsupported Media Type</title></head><body><h1>Unsupported Media Type</h1><hr><p>Comanche Server</p></body></html>";
+	my $reponse = "<html><head><title>Unsupported Media Type</title></head><body><h1>Unsupported Media Type</h1></body></html>";
 	$message = "HTTP/1.1 415 Unsupported Media Type\r\n" .
 				"Content-type : text/html\r\n" .
 				"Content-Length : " . length($reponse) . "\r\n\r\n" .
+				$reponse . "\r\n";
+	return $message;
+}
+
+sub error503 {
+	my $message;
+	my $reponse  = "<html><head><title>Service Unavailable<</title></head><body><h1>Service Unavailable</h1><h2>Trop de connexions simultanées, réessayez plus tard</h2></body></html>";		 
+	$message = "HTTP/1.1 503 Service Unavailable\r\n" .
+	        	"Content-Type: text/html; charset=utf-8\r\n" .
+				"Content-Length: " . length($reponse) . "\r\n\r\n" .
 				$reponse . "\r\n";
 	return $message;
 }
