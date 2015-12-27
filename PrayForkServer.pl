@@ -10,7 +10,8 @@ no warnings 'experimental::smartmatch';
 init("comanche.conf");
 
 while(<STDIN>) {
-	lectureRequete($_);
+	print lectureRequete($_);
+	exit 0;
 }
 
 #Initialisation des paramétres
@@ -76,25 +77,29 @@ sub init {
 
 # Traitement requête GET
 sub lectureRequete {
+	my $message;
+
 	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/) {
 		$chemin = verifProjection($1);
 		
 		if ($chemin) {
-			verifChemin(substr($chemin,1));
+			$message = verifChemin(substr($chemin,1));
 		}
 		else {
-			error404();
+			$message = error404();
 		}
 	}
 	else {
-		error400();
+		$message = error400();
 	}
+
+	return $message;
 }
 
 # Verifie toute les projections
 sub verifProjection {
-		$path = shift();
-		$chemin = undef;
+		my $path = shift();
+		my $chemin = undef;
 		foreach $route (@routes) {
 			if ($path =~ $route) {
 				if(exists $confs{"route"}{$route}) {
@@ -127,36 +132,40 @@ sub verifProjection {
 
 # Verifie si la ressource demandé existe, si oui, une réponse est créée en fonction du type de la ressource
 sub verifChemin {
-	$chemin = shift();
+	my $chemin = shift();
+	my $message;
 	# Si la ressource n'existe pas
 	if (! -e $chemin) {
-		error404();
+		$message = error404();
 	}
 	else {
 		# Si fichier ou dossier
 		if ($routeExec eq "route") {
-			versFichiers($chemin);
+			$message = versFichiers($chemin);
 		}
 		# Si Exec
 		else {
-			versCGI($chemin);
+			$message = versCGI($chemin);
 		}
 	}
+
+	return $message;
 }
 
 sub versFichiers {
-	$chemin = shift();
+	my $chemin = shift();
+	my $message;
 	# Si c'est un dossier
 	if (-d $chemin) {
 		# Et que l'index existe
 		if (-e "$chemin/$confs{\"set\"}{\"index\"}") {
 			$chemin = "$chemin/$confs{\"set\"}{index}";
-			envoieOk($chemin, "text/html");
+			$message = envoieOk($chemin, "text/html");
 		}
 		# Sinon on créer une page html pour lister son contenu
 		else {
 			$chemin = listerElements($chemin);
-			envoieOk($chemin, "text/html");
+			$message = envoieOk($chemin, "text/html");
 			}
 		}
 	# Si fichier
@@ -173,25 +182,30 @@ sub versFichiers {
 			elsif((split(/\./, "$chemin"))[-1] eq "txt") {
 				$mime = "text/plain";
 			}
-			envoieOk($chemin, $mime);
+			$message = envoieOk($chemin, $mime);
 		}
 		else {
-			error415();
+			$message = error415();
 		}
 	}
+
+	return $message;
 }
 
 sub versCGI {
-	$chemin = shift();
-	$reponse = `perl $chemin`;
-	$mime = ".html";
-	envoieReponse($reponse, $mime);
+	my $chemin = shift();
+	my $message;
+	my $reponse = `perl $chemin`;
+	my $mime = ".html";
+	$message = envoieReponse($reponse, $mime);
+
+	return $message;
 }
 
 # Créer une réponse HTML qui liste tous les fichiers d'un dossier
 sub listerElements {
-	$chemin = shift();
-	$liste = "$chemin/liste.html";
+	my $chemin = shift();
+	my $liste = "$chemin/liste.html";
 	open(FIC, '>', $liste) or die "Open : $liste :  $!";
 
 	print FIC "<html>\n\t<head>\n\t\t<title>Liste elements</title>\n\t</head>\n\t<body>\n\t\t<center>\n\t\t\t<h1>Liste elements</h1>\n\t\t\t<ul>";
@@ -199,7 +213,6 @@ sub listerElements {
 		$file = (split(/\//, "$file"))[-1];
 		print FIC "\n\t\t\t\t<li><a href=\"$file\">$file</a></li>";
 	}
-
 	print FIC "\n\t\t\t</ul>\n\t\t</center>\n\t</body>\n</head>";
 
 	close(FIC);
@@ -223,54 +236,59 @@ sub readFile {
 
 # Envoie Ok
 sub envoieOk {
-	$chemin = shift();
-	$mime = shift();
-	$reponse = readFile($chemin);
-	print "HTTP/1.1 200 OK\r\n" .
-			"Content-type : $mime\r\n" .
-			"Content-Length : " . length($reponse) . "\r\n\r\n" .
-			$reponse . "\r\n";
-	exit 0;
+	my $message;
+	my $chemin = shift();
+	my $mime = shift();
+	my $reponse = readFile($chemin);
+	$message = "HTTP/1.1 200 OK\r\n" .
+				"Content-type : $mime\r\n" .
+				"Content-Length : " . length($reponse) . "\r\n\r\n" .
+				$reponse . "\r\n";
+	return $message;
 }
 
 # Envoie une reponse
 sub envoieReponse {
-	$reponse = shift();
-	$mime = shift();
-	print "HTTP/1.1 200 OK\r\n" .
-			"Content-type : $mime\r\n" .
-			"Content-Length : " . length($reponse) . "\r\n\r\n" .
-			$reponse . "\r\n";
-	exit 0;
+	my $message;
+	my $reponse = shift();
+	my $mime = shift();
+	$message = "HTTP/1.1 200 OK\r\n" .
+				"Content-type : $mime\r\n" .
+				"Content-Length : " . length($reponse) . "\r\n\r\n" .
+				$reponse . "\r\n";
+	return $message;
 }
 
 # Envoie une erreur 404
 sub error404 {
+	my $message;
     # On considere que la page par default est celle qui reponds a une erreur de type 404
-    $reponse = readFile(substr($confs{"set"}{"error"}, 1));
+    my $reponse = readFile(substr($confs{"set"}{"error"}, 1));
     # On envoie la réponse
-    print "HTTP/1.1 404 Not Found\r\n" .
-	      	"Content-Type : text/html\r\n" .
-		  	"Content-Length : " . length($reponse) . "\r\n\r\n" .
-		 	$reponse . "\r\n";
-    exit 0;
+    $message = "HTTP/1.1 404 Not Found\r\n" .
+	      		"Content-Type : text/html\r\n" .
+		  		"Content-Length : " . length($reponse) . "\r\n\r\n" .
+		 		$reponse . "\r\n";
+    return $message;
 }
 
 # Envoie une erreur 400
 sub error400 {
-    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Server</p></body></html>";
-    print "HTTP/1.1 400 Bad Request\r\n" .
-	      	"Content-type : text/html\r\n" .
-		  	"Content-Length: " . length($reponse) . "\r\n\r\n" .
-		 	$reponse . "\r\n";
-    exit 0;
+	my $message;
+    my $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Server</p></body></html>";
+    $message = "HTTP/1.1 400 Bad Request\r\n" .
+	      		"Content-type : text/html\r\n" .
+		  		"Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 		$reponse . "\r\n";
+    return $message;
 }
 
 sub error415 {
-	$reponse = "<html><head><title>Unsupported Media Type</title></head><body><h1>Unsupported Media Type</h1><hr><p>Comanche Server</p></body></html>";
-	print "HTTP/1.1 415 Unsupported Media Type\r\n" .
-			"Content-type : text/html\r\n" .
-			"Content-Length : " . length($reponse) . "\r\n\r\n" .
-			$reponse . "\r\n";
-	exit 0;
+	my $message;
+	my $reponse = "<html><head><title>Unsupported Media Type</title></head><body><h1>Unsupported Media Type</h1><hr><p>Comanche Server</p></body></html>";
+	$message = "HTTP/1.1 415 Unsupported Media Type\r\n" .
+				"Content-type : text/html\r\n" .
+				"Content-Length : " . length($reponse) . "\r\n\r\n" .
+				$reponse . "\r\n";
+	return $message;
 }
