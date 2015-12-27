@@ -3,13 +3,8 @@
 TODO
 --------
 - [x] Configuration
-<<<<<<< HEAD
 - [ ] Traitement des GET...
-  - [ ] ...vers le système de fichiers
-=======
-- [x] Traitement des GET...
   - [x] ...vers le système de fichiers
->>>>>>> traitementGet
   - [ ] ...vers des programmes CGI
 - [ ] Journal des évènements
 - [ ] Traitement des requêtes en parallèle
