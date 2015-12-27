@@ -3,15 +3,18 @@
 use Socket;
 use POSIX ":sys_wait_h";
 
+no warnings qw( experimental::autoderef );
+no warnings 'experimental::smartmatch';
+
 # Initialisation du server avec les valeurs du fichier "comanche.conf"
 init("comanche.conf");
 
-while(<STDIN>){
+while(<STDIN>) {
 	lectureRequete($_);
 }
 
 #Initialisation des paramétres
-sub init{
+sub init {
 	sub order{
 		if(s/^set ([\w]+)/$1/g) {
 			@order = split / /;
@@ -46,6 +49,7 @@ sub init{
 	$confs{"set"}{"logfile"} = "";
 	$confs{"set"}{"clients"} = 1;
 	@routes = ();
+	$routeExec = "route";
 
 	# Ouverture du fichier de config
 	open(CONFIG, shift() ) or die "open: $!";
@@ -71,12 +75,12 @@ sub init{
 
 
 # Traitement requête GET
-sub lectureRequete{
-	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/){
+sub lectureRequete {
+	if ($_ =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/) {
 		$chemin = verifProjection($1);
 		
-		if ($chemin){
-			verifChemin($chemin);
+		if ($chemin) {
+			verifChemin(substr($chemin,1));
 		}
 		else {
 			error404();
@@ -88,21 +92,18 @@ sub lectureRequete{
 }
 
 # Verifie toute les projections
-sub verifProjection{
+sub verifProjection {
 		$path = shift();
 		$chemin = undef;
 		foreach $route (@routes) {
-			if ($path =~ $route){
-				if(exists $confs{"route"}{$route})
-				{
+			if ($path =~ $route) {
+				if(exists $confs{"route"}{$route}) {
 					$routeExec = "route";
 				}
-				elsif(exists $confs{"exec"}{$route})
-				{
+				elsif(exists $confs{"exec"}{$route}) {
 					$routeExec = "exec";
 				}
-				else
-				{
+				else {
 					next;
 				}
 				$chemin = $confs{$routeExec}{$route};
@@ -124,23 +125,89 @@ sub verifProjection{
 		return $chemin;
 }
 
-# Verifie si ce que l'on demande existe, si oui, une réponse est créer en fonction du type MIME
-sub verifChemin{
-	$chemin = substr($_[0],1);
-	print $chemin, "\n";
-	if (! -e $chemin)
-	{
+# Verifie si la ressource demandé existe, si oui, une réponse est créée en fonction du type de la ressource
+sub verifChemin {
+	$chemin = shift();
+	# Si la ressource n'existe pas
+	if (! -e $chemin) {
 		error404();
 	}
 	else {
-		#TODO: tester si c'est un dossier, sinon tester son type MIME pour construire une réponse
-		print "Le fichier existe, maintenant il faut tester son MIME \n";
+		# Si fichier ou dossier
+		if ($routeExec eq "route") {
+			versFichiers($chemin);
+		}
+		# Si Exec
+		else {
+			versCGI($chemin);
+		}
 	}
 }
 
+sub versFichiers {
+	$chemin = shift();
+	# Si c'est un dossier
+	if (-d $chemin) {
+		# Et que l'index existe
+		if (-e "$chemin/$confs{\"set\"}{\"index\"}") {
+			$chemin = "$chemin/$confs{\"set\"}{index}";
+			envoieOk($chemin, "text/html");
+		}
+		# Sinon on créer une page html pour lister son contenu
+		else {
+			$chemin = listerElements($chemin);
+			envoieOk($chemin, "text/html");
+			}
+		}
+	# Si fichier
+	else {
+		# On vérifie son type et on le retourne si il est dans la liste des types supportés
+		@ext = ("html", "png", "txt");
+		if((split(/\./, "$chemin"))[-1] ~~ @ext) {
+			if((split(/\./, "$chemin"))[-1] eq "html") {
+				$mime = "text/html";
+			}
+			elsif((split(/\./, "$chemin"))[-1] eq "png") {
+				$mime = "image/png";
+			}
+			elsif((split(/\./, "$chemin"))[-1] eq "txt") {
+				$mime = "text/plain";
+			}
+			envoieOk($chemin, $mime);
+		}
+		else {
+			error415();
+		}
+	}
+}
+
+sub versCGI {
+	$chemin = shift();
+	$reponse = `perl $chemin`;
+	$mime = ".html";
+	envoieReponse($reponse, $mime);
+}
+
+# Créer une réponse HTML qui liste tous les fichiers d'un dossier
+sub listerElements {
+	$chemin = shift();
+	$liste = "$chemin/liste.html";
+	open(FIC, '>', $liste) or die "Open : $liste :  $!";
+
+	print FIC "<html>\n\t<head>\n\t\t<title>Liste elements</title>\n\t</head>\n\t<body>\n\t\t<center>\n\t\t\t<h1>Liste elements</h1>\n\t\t\t<ul>";
+	foreach $file (glob("$chemin/*")) {
+		$file = (split(/\//, "$file"))[-1];
+		print FIC "\n\t\t\t\t<li><a href=\"$file\">$file</a></li>";
+	}
+
+	print FIC "\n\t\t\t</ul>\n\t\t</center>\n\t</body>\n</head>";
+
+	close(FIC);
+	return $liste;
+}
+
 # Procedure permettant de lire le contenue d'un fichier avant de l'afficher
-sub readFile
-{
+sub readFile {
     #on protege la variable
     my $contenu;
     
@@ -154,28 +221,56 @@ sub readFile
     return $contenu;
 }
 
-# Renvoie erreur 404
-sub error404
-{
+# Envoie Ok
+sub envoieOk {
+	$chemin = shift();
+	$mime = shift();
+	$reponse = readFile($chemin);
+	print "HTTP/1.1 200 OK\r\n" .
+			"Content-type : $mime\r\n" .
+			"Content-Length : " . length($reponse) . "\r\n\r\n" .
+			$reponse . "\r\n";
+	exit 0;
+}
+
+# Envoie une reponse
+sub envoieReponse {
+	$reponse = shift();
+	$mime = shift();
+	print "HTTP/1.1 200 OK\r\n" .
+			"Content-type : $mime\r\n" .
+			"Content-Length : " . length($reponse) . "\r\n\r\n" .
+			$reponse . "\r\n";
+	exit 0;
+}
+
+# Envoie une erreur 404
+sub error404 {
     # On considere que la page par default est celle qui reponds a une erreur de type 404
-    $reponse = readFile($confs{"set"}{"error"});
-    $reponse .= "<hr><p>Comanche Version 1</p>";
+    $reponse = readFile(substr($confs{"set"}{"error"}, 1));
     # On envoie la réponse
     print "HTTP/1.1 404 Not Found\r\n" .
-	      "Content-Type: text/html\r\n" .
-		  "Content-Length: " . length($reponse) . "\r\n\r\n" .
-		 $reponse;
+	      	"Content-Type : text/html\r\n" .
+		  	"Content-Length : " . length($reponse) . "\r\n\r\n" .
+		 	$reponse . "\r\n";
     exit 0;
 }
 
-# Renvoie erreur 400
-sub error400
-{
-    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Version 1</p></body></html>";
+# Envoie une erreur 400
+sub error400 {
+    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Server</p></body></html>";
     print "HTTP/1.1 400 Bad Request\r\n" .
-	      "Content-type : text/html\r\n" .
-		  "Content-Length: " . length($reponse) . "\r\n\r\n" .
-		 $reponse;
+	      	"Content-type : text/html\r\n" .
+		  	"Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 	$reponse . "\r\n";
     exit 0;
+}
 
+sub error415 {
+	$reponse = "<html><head><title>Unsupported Media Type</title></head><body><h1>Unsupported Media Type</h1><hr><p>Comanche Server</p></body></html>";
+	print "HTTP/1.1 415 Unsupported Media Type\r\n" .
+			"Content-type : text/html\r\n" .
+			"Content-Length : " . length($reponse) . "\r\n\r\n" .
+			$reponse . "\r\n";
+	exit 0;
 }
