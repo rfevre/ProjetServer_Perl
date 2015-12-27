@@ -1,0 +1,4 @@
+#!/usr/bin/perl
+
+print "Bonjour je suis test.exe","\n";
+print "1er param = $ARGV[0]","\n";
